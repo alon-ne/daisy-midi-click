@@ -1,6 +1,5 @@
 #include "daisy_pod.h"
 #include "daisysp.h"
-#include <string.h>
 
 using namespace daisy;
 using namespace daisysp;
@@ -15,11 +14,18 @@ enum State {
 enum {
 	BEAT1_FREQ = 440,
 	BEATN_FREQ = 330,
-	SONG_POSITION_TO_MIDI_CLOCK_RATIO = 6
+	SONG_POSITION_TO_MIDI_CLOCK_RATIO = 6,
+	AUDIO_BLOCK_SIZE = 48,
+
+	BEAT1_WAV_INDEX = 0,
+	BEATN_WAV_INDEX = 0,
 };
 
+static const int MIDI_CLOCKS_PER_QUARTER_NOTE = 24;
+static const int QUARTERS_PER_MEASURE = 4;
 DaisyPod hw;
 Oscillator osc;
+SdmmcHandler sdcard;
 WavPlayer sampler;
 
 bool beep = false;
@@ -44,7 +50,7 @@ void AudioCallback(AudioHandle::InterleavingInputBuffer in,
 				   AudioHandle::InterleavingOutputBuffer out,
 				   size_t size) {
 	for (size_t i = 0; i < size; i += 2) {
-		out[i] = out[i + 1] = osc.Process();
+		out[i] = out[i + 1] = s162f(sampler.Stream());
 	}
 }
 
@@ -123,18 +129,16 @@ void HandleTimingClock() {
 			state = PLAYING;
 
 		case PLAYING: {
-			Color color1;
-			Color color2;
 			if (beat == 0) {
-				color1 = beat1Color;
 				osc.SetFreq(BEAT1_FREQ);
 			} else {
 				osc.SetFreq(BEATN_FREQ);
 			}
 
-			color2 = beatnColor;
-
-			if (midiClock <= 3) {
+			if (midiClock == 0) {
+				sampler.Open(beat == 0);
+				sampler.Restart();
+			} else if (midiClock <= 3) {
 				osc.SetAmp(1.0);
 				if (beat == 0) {
 					hw.led1.SetColor(beat1Color);
@@ -162,9 +166,9 @@ void HandleTimingClock() {
 	}
 
 	midiClock++;
-	if (midiClock >= 24) {
+	if (midiClock >= MIDI_CLOCKS_PER_QUARTER_NOTE) {
 		midiClock = 0;
-		beat = (beat + 1) % 4;
+		beat = (beat + 1) % QUARTERS_PER_MEASURE;
 	}
 }
 
@@ -175,10 +179,22 @@ int main(void) {
 	hw.seed.usb_handle.Init(UsbHandle::FS_INTERNAL);
 	System::Delay(250);
 
+    SdmmcHandler::Config sd_cfg;
+    sd_cfg.Defaults();
+    sdcard.Init(sd_cfg);
+
 	osc.Init(hw.AudioSampleRate());
 	osc.SetWaveform(Oscillator::WAVE_POLYBLEP_TRI);
 	osc.SetAmp(0);
+	sampler.Init();
+	if (sampler.GetNumberFiles() < 2) {
+		hw.led1.SetRed(1.0);
+		hw.led2.SetRed(1.0);
+		hw.UpdateLeds();
+		return -1;
+	}
 
+	hw.SetAudioBlockSize(AUDIO_BLOCK_SIZE);
 	hw.StartAudio(AudioCallback);
 	hw.midi.StartReceive();
 
@@ -186,6 +202,7 @@ int main(void) {
 	beatnColor.Init(Color::GREEN);
 
 	for (;;) {
+		sampler.Prepare();
 		hw.midi.Listen();
 		while (hw.midi.HasEvents()) {
 			HandleMidiMessage(hw.midi.PopEvent());
