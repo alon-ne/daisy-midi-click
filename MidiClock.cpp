@@ -3,10 +3,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "beat1.h"
-#include "beatn.h"
-
-
 using namespace daisy;
 using namespace daisysp;
 
