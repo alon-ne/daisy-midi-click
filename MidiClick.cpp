@@ -12,31 +12,32 @@ enum State {
 };
 
 enum {
-	BEAT1_FREQ = 440,
-	BEATN_FREQ = 330,
 	SONG_POSITION_TO_MIDI_CLOCK_RATIO = 6,
 	AUDIO_BLOCK_SIZE = 48,
 
-	BEAT1_WAV_INDEX = 0,
+	BEAT1_WAV_INDEX = 1,
 	BEATN_WAV_INDEX = 0,
+
+	MIDI_CLOCKS_PER_QUARTER_NOTE = 24,
+	QUARTERS_PER_MEASURE = 4,
+	LEDS_OFF_MIDI_CLOCK = MIDI_CLOCKS_PER_QUARTER_NOTE / 4,
 };
 
-static const int MIDI_CLOCKS_PER_QUARTER_NOTE = 24;
-static const int QUARTERS_PER_MEASURE = 4;
+
 DaisyPod hw;
-Oscillator osc;
 SdmmcHandler sdcard;
 WavPlayer sampler;
 
-bool beep = false;
 int midiClock = 0;
 int continueClock = 0;
-bool playing = false;
+
 State state = STOPPED;
 int beat = 0;
 int continueBeat = 0;
+
 Color beat1Color;
-Color beatnColor;
+Color allBeatsColor;
+Color offColor;
 
 void HandleTimingClock();
 
@@ -45,6 +46,8 @@ void HandleSystemCommon(MidiEvent &m);
 void HandleSystemRealTime(MidiEvent &m);
 
 void HandleControlChange(MidiEvent &m);
+
+void handleBeat();
 
 void AudioCallback(AudioHandle::InterleavingInputBuffer in,
 				   AudioHandle::InterleavingOutputBuffer out,
@@ -129,25 +132,11 @@ void HandleTimingClock() {
 			state = PLAYING;
 
 		case PLAYING: {
-			if (beat == 0) {
-				osc.SetFreq(BEAT1_FREQ);
-			} else {
-				osc.SetFreq(BEATN_FREQ);
-			}
-
 			if (midiClock == 0) {
-				sampler.Open(beat == 0);
-				sampler.Restart();
-			} else if (midiClock <= 3) {
-				osc.SetAmp(1.0);
-				if (beat == 0) {
-					hw.led1.SetColor(beat1Color);
-				}
-				hw.led2.SetColor(beatnColor);
-			} else {
-				osc.SetAmp(0);
-				hw.led1.Set(0, 0, 0);
-				hw.led2.Set(0, 0, 0);
+				handleBeat();
+			} else if (midiClock > LEDS_OFF_MIDI_CLOCK) {
+				hw.led1.SetColor(offColor);
+				hw.led2.SetColor(offColor);
 			}
 			hw.UpdateLeds();
 			break;
@@ -157,7 +146,6 @@ void HandleTimingClock() {
 			continueClock = midiClock;
 			continueBeat = beat;
 			state = STOPPED;
-			beep = false;
 			hw.seed.SetLed(false);
 			break;
 
@@ -172,21 +160,31 @@ void HandleTimingClock() {
 	}
 }
 
+void handleBeat() {
+	// if (beat == 0) {
+	// 	sampler.Open(BEAT1_WAV_INDEX);
+	// 	hw.led1.SetColor(beat1Color);
+	// } else {
+	// 	sampler.Open(BEATN_WAV_INDEX);
+	// }
+	// sampler.Open(BEATN_WAV_INDEX);
 
-// Main -- Init, and Midi Handling
-int main(void) {
-	hw.Init();
-	hw.seed.usb_handle.Init(UsbHandle::FS_INTERNAL);
-	System::Delay(250);
+	if (beat == 0) {
+		hw.led1.SetColor(beat1Color);
+	}
 
-    SdmmcHandler::Config sd_cfg;
-    sd_cfg.Defaults();
-    sdcard.Init(sd_cfg);
+	sampler.Restart();
+	hw.led2.SetColor(allBeatsColor);
+}
 
-	osc.Init(hw.AudioSampleRate());
-	osc.SetWaveform(Oscillator::WAVE_POLYBLEP_TRI);
-	osc.SetAmp(0);
+
+int initSampler() {
+	SdmmcHandler::Config sd_cfg;
+	sd_cfg.Defaults();
+	sdcard.Init(sd_cfg);
+
 	sampler.Init();
+
 	if (sampler.GetNumberFiles() < 2) {
 		hw.led1.SetRed(1.0);
 		hw.led2.SetRed(1.0);
@@ -194,12 +192,29 @@ int main(void) {
 		return -1;
 	}
 
+	return 0;
+}
+
+void initPod() {
+	hw.Init();
+	hw.seed.usb_handle.Init(UsbHandle::FS_INTERNAL);
+
 	hw.SetAudioBlockSize(AUDIO_BLOCK_SIZE);
 	hw.StartAudio(AudioCallback);
 	hw.midi.StartReceive();
+}
+
+int main(void) {
+	initPod();
+
+	int rc = initSampler();
+	if (rc != 0) {
+		return rc;
+	}
 
 	beat1Color.Init(Color::RED);
-	beatnColor.Init(Color::GREEN);
+	allBeatsColor.Init(Color::GREEN);
+	offColor.Init(Color::OFF);
 
 	for (;;) {
 		sampler.Prepare();
