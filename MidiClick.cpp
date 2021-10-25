@@ -1,8 +1,10 @@
 #include "daisy_pod.h"
-#include "daisysp.h"
+
+#include "beat1.h"
+#include "beatn.h"
+#include "wavstreamer.h"
 
 using namespace daisy;
-using namespace daisysp;
 
 enum State {
 	STOPPED,
@@ -15,9 +17,6 @@ enum {
 	SONG_POSITION_TO_MIDI_CLOCK_RATIO = 6,
 	AUDIO_BLOCK_SIZE = 48,
 
-	BEAT1_WAV_INDEX = 1,
-	BEATN_WAV_INDEX = 0,
-
 	MIDI_CLOCKS_PER_QUARTER_NOTE = 24,
 	QUARTERS_PER_MEASURE = 4,
 	LEDS_OFF_MIDI_CLOCK = MIDI_CLOCKS_PER_QUARTER_NOTE / 4,
@@ -25,8 +24,9 @@ enum {
 
 
 DaisyPod hw;
-SdmmcHandler sdcard;
-WavPlayer sampler;
+WavStreamer beat1Wav;
+WavStreamer beatnWav;
+WavStreamer *activeBeatWav;
 
 int midiClock = 0;
 int continueClock = 0;
@@ -37,7 +37,6 @@ int continueBeat = 0;
 
 Color beat1Color;
 Color allBeatsColor;
-Color offColor;
 
 void HandleTimingClock();
 
@@ -47,13 +46,13 @@ void HandleSystemRealTime(MidiEvent &m);
 
 void HandleControlChange(MidiEvent &m);
 
-void handleBeat();
+void playBeat();
 
 void AudioCallback(AudioHandle::InterleavingInputBuffer in,
 				   AudioHandle::InterleavingOutputBuffer out,
 				   size_t size) {
 	for (size_t i = 0; i < size; i += 2) {
-		out[i] = out[i + 1] = s162f(sampler.Stream());
+		out[i] = out[i + 1] = s162f(activeBeatWav->Stream());
 	}
 }
 
@@ -95,6 +94,7 @@ void HandleSystemRealTime(MidiEvent &m) {
 		case TimingClock:
 			HandleTimingClock();
 			break;
+
 		default:
 			break;
 	}
@@ -133,10 +133,9 @@ void HandleTimingClock() {
 
 		case PLAYING: {
 			if (midiClock == 0) {
-				handleBeat();
+				playBeat();
 			} else if (midiClock > LEDS_OFF_MIDI_CLOCK) {
-				hw.led1.SetColor(offColor);
-				hw.led2.SetColor(offColor);
+				hw.ClearLeds();
 			}
 			hw.UpdateLeds();
 			break;
@@ -146,7 +145,8 @@ void HandleTimingClock() {
 			continueClock = midiClock;
 			continueBeat = beat;
 			state = STOPPED;
-			hw.seed.SetLed(false);
+			hw.ClearLeds();
+			hw.UpdateLeds();
 			break;
 
 		case STOPPED:
@@ -160,40 +160,18 @@ void HandleTimingClock() {
 	}
 }
 
-void handleBeat() {
-	// if (beat == 0) {
-	// 	sampler.Open(BEAT1_WAV_INDEX);
-	// 	hw.led1.SetColor(beat1Color);
-	// } else {
-	// 	sampler.Open(BEATN_WAV_INDEX);
-	// }
-	// sampler.Open(BEATN_WAV_INDEX);
-
+void playBeat() {
 	if (beat == 0) {
+		activeBeatWav = &beat1Wav;
 		hw.led1.SetColor(beat1Color);
+	} else {
+		activeBeatWav = &beatnWav;
 	}
 
-	sampler.Restart();
+	activeBeatWav->Restart();
 	hw.led2.SetColor(allBeatsColor);
 }
 
-
-int initSampler() {
-	SdmmcHandler::Config sd_cfg;
-	sd_cfg.Defaults();
-	sdcard.Init(sd_cfg);
-
-	sampler.Init();
-
-	if (sampler.GetNumberFiles() < 2) {
-		hw.led1.SetRed(1.0);
-		hw.led2.SetRed(1.0);
-		hw.UpdateLeds();
-		return -1;
-	}
-
-	return 0;
-}
 
 void initPod() {
 	hw.Init();
@@ -204,20 +182,20 @@ void initPod() {
 	hw.midi.StartReceive();
 }
 
+void initWaves() {
+	beat1Wav.Init((int16_t*)beat1_data, sizeof(beat1_data) / sizeof(int16_t));
+	beatnWav.Init((int16_t*)beatn_data, sizeof(beatn_data) / sizeof(int16_t));
+	activeBeatWav = &beat1Wav;
+}
+
 int main(void) {
 	initPod();
-
-	int rc = initSampler();
-	if (rc != 0) {
-		return rc;
-	}
+	initWaves();
 
 	beat1Color.Init(Color::RED);
 	allBeatsColor.Init(Color::GREEN);
-	offColor.Init(Color::OFF);
 
 	for (;;) {
-		sampler.Prepare();
 		hw.midi.Listen();
 		while (hw.midi.HasEvents()) {
 			HandleMidiMessage(hw.midi.PopEvent());
