@@ -144,8 +144,7 @@ void HandleTimingClock() {
 			continueClock = midiClock;
 			continueBeat = beat;
 			state = STOPPED;
-			beat1Wav.Stop();
-			beatnWav.Stop();
+			activeBeatWav->Stop();
 			hw.ClearLeds();
 			hw.UpdateLeds();
 			break;
@@ -172,8 +171,7 @@ void playBeat() {
 		hw.led1.SetColor(beat1Color);
 	}
 
-	beat1Wav.Restart();
-	beatnWav.Restart();
+	activeBeatWav->Play();
 	hw.led2.SetColor(allBeatsColor);
 }
 

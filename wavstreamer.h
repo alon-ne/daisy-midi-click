@@ -32,11 +32,9 @@ public:
 		return sample;
 	}
 
-	void Play() { playing_ = true; }
-
 	void Stop() { playing_ = false; }
 
-	void Restart() {
+	void Play() {
 		offset_ = 0;
 		playing_ = true;
 	}
