@@ -10,7 +10,7 @@ enum State {
 	STOPPED,
 	STARTING,
 	PLAYING,
-	STOPPING
+	STOPPING,
 };
 
 enum {
@@ -19,14 +19,14 @@ enum {
 
 	MIDI_CLOCKS_PER_QUARTER_NOTE = 24,
 	QUARTERS_PER_MEASURE = 4,
-	LEDS_OFF_MIDI_CLOCK = MIDI_CLOCKS_PER_QUARTER_NOTE / 4,
+	LEDS_OFF_TIME = MIDI_CLOCKS_PER_QUARTER_NOTE / 4,
 };
 
 
 DaisyPod hw;
 WavStreamer beat1Wav;
 WavStreamer beatnWav;
-WavStreamer *activeBeatWav;
+WavStreamer *activeBeatWav = &beat1Wav;
 
 int midiClock = 0;
 int continueClock = 0;
@@ -52,7 +52,7 @@ void AudioCallback(AudioHandle::InterleavingInputBuffer in,
 				   AudioHandle::InterleavingOutputBuffer out,
 				   size_t size) {
 	for (size_t i = 0; i < size; i += 2) {
-		out[i] = out[i + 1] = s162f(activeBeatWav->Stream());
+		out[i] = out[i + 1] = activeBeatWav->Stream();
 	}
 }
 
@@ -131,20 +131,21 @@ void HandleTimingClock() {
 			beat = continueBeat;
 			state = PLAYING;
 
-		case PLAYING: {
+		case PLAYING:
 			if (midiClock == 0) {
 				playBeat();
-			} else if (midiClock > LEDS_OFF_MIDI_CLOCK) {
+			} else if (midiClock > LEDS_OFF_TIME) {
 				hw.ClearLeds();
 			}
 			hw.UpdateLeds();
 			break;
 
-		}
 		case STOPPING:
 			continueClock = midiClock;
 			continueBeat = beat;
 			state = STOPPED;
+			beat1Wav.Stop();
+			beatnWav.Stop();
 			hw.ClearLeds();
 			hw.UpdateLeds();
 			break;
@@ -163,15 +164,18 @@ void HandleTimingClock() {
 void playBeat() {
 	if (beat == 0) {
 		activeBeatWav = &beat1Wav;
-		hw.led1.SetColor(beat1Color);
 	} else {
 		activeBeatWav = &beatnWav;
 	}
 
-	activeBeatWav->Restart();
+	if (beat == 0) {
+		hw.led1.SetColor(beat1Color);
+	}
+
+	beat1Wav.Restart();
+	beatnWav.Restart();
 	hw.led2.SetColor(allBeatsColor);
 }
-
 
 void initPod() {
 	hw.Init();
@@ -183,14 +187,13 @@ void initPod() {
 }
 
 void initWaves() {
-	beat1Wav.Init((int16_t*)beat1_data, sizeof(beat1_data) / sizeof(int16_t));
-	beatnWav.Init((int16_t*)beatn_data, sizeof(beatn_data) / sizeof(int16_t));
-	activeBeatWav = &beat1Wav;
+	beat1Wav.Init((float *) beat1_data, sizeof(beat1_data) / sizeof(float));
+	beatnWav.Init((float *) beatn_data, sizeof(beatn_data) / sizeof(float));
 }
 
 int main(void) {
-	initPod();
 	initWaves();
+	initPod();
 
 	beat1Color.Init(Color::RED);
 	allBeatsColor.Init(Color::GREEN);

@@ -12,19 +12,19 @@ public:
 	WavStreamer() {}
 	~WavStreamer() {}
 
-	void Init(const int16_t *samples, size_t size) {
+	void Init(const float *samples, size_t size) {
 		samples_ = samples;
 		size_ = size;
 		offset_ = 0;
 		playing_ = false;
 	}
 
-	int16_t Stream() {
+	float Stream() {
 		if (!playing_) {
 			return 0;
 		}
 
-		int16_t sample = samples_[offset_++];
+		float sample = samples_[offset_++];
 		if (offset_ >= size_) {
 			offset_ = 0;
 			playing_ = false;
@@ -47,7 +47,7 @@ public:
 
 private:
 	bool playing_;
-	const int16_t *samples_;
+	const float *samples_;
 	size_t size_;
 	size_t offset_;
 };
